@@ -2,7 +2,7 @@
 Módulo para extraer campos de formularios PDF.
 """
 
-from pypdf import PdfReader
+from PyPDF2 import PdfReader
 from typing import Dict, List, Any
 
 
