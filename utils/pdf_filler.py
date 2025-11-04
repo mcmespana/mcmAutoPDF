@@ -2,7 +2,7 @@
 Módulo para rellenar formularios PDF con datos.
 """
 
-from PyPDF2 import PdfReader, PdfWriter
+from pypdf import PdfReader, PdfWriter
 from typing import Dict, Any
 
 
@@ -64,10 +64,7 @@ class PDFFiller:
             # Aplanar si se solicita (hacer campos no editables)
             if flatten:
                 try:
-                    # Intentar con el método de PyPDF2 3.0+
-                    for page in writer.pages:
-                        page.compress_content_streams()
-                    # PyPDF2 no tiene flatten_annotations, solo lo simulamos
+                    writer.flatten_annotations()
                 except:
                     pass
             
