@@ -22,60 +22,78 @@ class PDFFiller:
     def fill_pdf(self, data: Dict[str, str], output_path: str, flatten: bool = False) -> bool:
         """
         Rellena el PDF con los datos proporcionados.
-        
+
         Args:
             data: Diccionario con {nombre_campo: valor}
             output_path: Ruta donde guardar el PDF rellenado
             flatten: Si True, el PDF se "aplana" (no se pueden editar los campos después)
-            
+
         Returns:
             True si se rellenó correctamente, False si hubo error
         """
         try:
             writer = PdfWriter()
-            
+
             # Copiar todas las páginas del PDF original
             for page in self.reader.pages:
                 writer.add_page(page)
-            
+
             # Preparar datos para rellenar
             processed_data = self._process_data(data)
-            
-            # Rellenar campos
-            if writer.get_fields():
-                writer.update_page_form_field_values(
-                    writer.pages[0], 
-                    processed_data,
-                    auto_regenerate=False
-                )
-            
-            # Si hay múltiples páginas, intentar rellenar en todas
-            for page_num in range(len(writer.pages)):
+
+            print(f"[DEBUG] Procesando {len(processed_data)} campos para rellenar")
+
+            # Obtener los campos disponibles en el PDF
+            pdf_fields = writer.get_fields()
+            if not pdf_fields:
+                print("[ERROR] El PDF no tiene campos de formulario")
+                return False
+
+            print(f"[DEBUG] PDF tiene {len(pdf_fields)} campos disponibles")
+
+            # Intentar rellenar los campos en cada página que los contenga
+            filled_count = 0
+            for page_num, page in enumerate(writer.pages):
                 try:
-                    writer.update_page_form_field_values(
-                        writer.pages[page_num], 
-                        processed_data,
-                        auto_regenerate=False
-                    )
-                except:
-                    # Algunas páginas pueden no tener campos
-                    pass
-            
+                    # Filtrar solo los datos que corresponden a campos existentes
+                    page_data = {k: v for k, v in processed_data.items() if k in pdf_fields}
+
+                    if page_data:
+                        writer.update_page_form_field_values(
+                            page,
+                            page_data,
+                            auto_regenerate=True  # CRUCIAL: regenerar apariencias
+                        )
+                        filled_count += len(page_data)
+                        print(f"[DEBUG] Página {page_num}: {len(page_data)} campos actualizados")
+                except Exception as e:
+                    print(f"[WARNING] Error en página {page_num}: {e}")
+                    continue
+
+            if filled_count == 0:
+                print("[WARNING] No se rellenó ningún campo")
+            else:
+                print(f"[SUCCESS] Total de campos rellenados: {filled_count}")
+
             # Aplanar si se solicita (hacer campos no editables)
             if flatten:
                 try:
                     writer.flatten_annotations()
-                except:
-                    pass
-            
+                    print("[DEBUG] PDF aplanado exitosamente")
+                except Exception as e:
+                    print(f"[WARNING] Error al aplanar: {e}")
+
             # Guardar el PDF rellenado
             with open(output_path, 'wb') as output_file:
                 writer.write(output_file)
-            
+
+            print(f"[SUCCESS] PDF guardado en: {output_path}")
             return True
-            
+
         except Exception as e:
-            print(f"Error al rellenar PDF: {e}")
+            print(f"[ERROR] Error al rellenar PDF: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def _process_data(self, data: Dict[str, str]) -> Dict[str, Any]:
