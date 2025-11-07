@@ -21,58 +21,60 @@ st.set_page_config(
 
 def main():
     """Función principal de la aplicación."""
-    
+
     st.title("📄 PDF Form Filler")
-    st.markdown("*Extrae campos de PDFs, genera plantillas CSV y rellena formularios automáticamente*")
-    
+    st.markdown("*Extrae campos de PDFs con detección automática de etiquetas y rellena formularios*")
+
     # Sidebar con información
     with st.sidebar:
         st.header("ℹ️ Cómo usar")
         st.markdown("""
         ### Paso 1: Extraer campos
         1. Sube tu PDF
-        2. Descarga la plantilla CSV
-        
+        2. La app detecta automáticamente las etiquetas de los campos
+        3. Descarga la plantilla CSV
+
         ### Paso 2: Rellenar PDF
         1. Edita el CSV con tus datos
-        2. Sube PDF + CSV
+        2. Sube PDF + CSV + archivo de mapeo
         3. Descarga el PDF rellenado
-        
+
         ---
-        
-        **Versión:** MVP 0.1  
+
+        **Versión:** v0.3 - Refactorizado
         **Soporte para tablas:** Próximamente 🔜
         """)
-        
+
         st.info("💡 Para checkboxes usa: **__YES__** o **__NO__**")
-    
+
     # Tabs principales
     tab1, tab2, tab3 = st.tabs(["🔍 Extraer Campos", "✍️ Rellenar PDF", "⚡ Editor Rápido"])
-    
+
     # TAB 1: EXTRAER CAMPOS
     with tab1:
         st.header("Paso 1: Extraer campos del PDF")
-        st.markdown("Sube un PDF con formulario para extraer sus campos y generar una plantilla CSV.")
-        
+        st.markdown("Sube un PDF con formulario. La aplicación detectará automáticamente las etiquetas de cada campo.")
+
         pdf_file = st.file_uploader(
             "Sube tu PDF",
             type=['pdf'],
             key='extract_pdf',
-            help="Solo PDFs con campos de formulario interactivos"
+            help="PDFs con campos de formulario interactivos (AcroForms o Adobe LiveCycle)"
         )
-        
+
         if pdf_file:
             # Guardar archivo temporalmente
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_pdf:
                 tmp_pdf.write(pdf_file.read())
                 tmp_pdf_path = tmp_pdf.name
-            
+
             try:
                 # Extraer información
-                extractor = PDFExtractor(tmp_pdf_path)
-                pdf_info = extractor.get_pdf_info()
-                fields = extractor.get_fields_with_descriptions()
-                
+                with st.spinner("Analizando PDF y detectando etiquetas..."):
+                    extractor = PDFExtractor(tmp_pdf_path)
+                    pdf_info = extractor.get_pdf_info()
+                    fields = extractor.get_fields_with_labels()
+
                 # Mostrar información
                 col1, col2, col3 = st.columns(3)
                 with col1:
@@ -84,18 +86,18 @@ def main():
                         st.success("✅ Tiene formulario")
                     else:
                         st.error("❌ Sin formulario")
-                
+
                 if pdf_info['num_fields'] > 0:
                     st.success(f"Se detectaron **{pdf_info['num_fields']} campos**")
-                    
+
                     # Mostrar campos en expander
                     with st.expander("🔎 Ver campos detectados", expanded=True):
                         for field_name, field_data in fields.items():
                             col_a, col_b, col_c = st.columns([2, 2, 1])
                             with col_a:
-                                # Mostrar descripción sugerida
-                                suggested = field_data.get('suggested_description', field_name)
-                                st.markdown(f"**{suggested}**")
+                                # Mostrar etiqueta detectada
+                                label = field_data.get('label', field_name)
+                                st.markdown(f"**{label}**")
                             with col_b:
                                 st.caption(f"📋 {field_name}")
                             with col_c:
@@ -111,39 +113,26 @@ def main():
                             # Mostrar opciones si las hay
                             if field_data['options']:
                                 st.caption(f"  Opciones: {', '.join(field_data['options'][:3])}{'...' if len(field_data['options']) > 3 else ''}")
-                    
+
                     # Opciones de generación
                     st.markdown("---")
                     st.subheader("Generar plantilla CSV")
 
-                    col_opt1, col_opt2 = st.columns(2)
-                    with col_opt1:
-                        use_descriptive = st.checkbox(
-                            "🌟 Usar nombres descriptivos en CSV",
-                            value=True,
-                            help="Usa descripciones legibles en lugar de nombres técnicos (Ej: 'Nombre' en vez de 'txt_field_1')"
-                        )
-                    with col_opt2:
-                        include_info = st.checkbox(
-                            "📋 Incluir archivo INFO",
-                            value=True,
-                            help="Genera un archivo adicional con información sobre cada campo"
-                        )
-                    
+                    include_info = st.checkbox(
+                        "📋 Incluir archivo INFO con detalles de campos",
+                        value=True,
+                        help="Genera un archivo adicional con información sobre cada campo"
+                    )
+
                     if st.button("📥 Generar y descargar CSV", type="primary", use_container_width=True):
                         # Generar CSV
                         with tempfile.NamedTemporaryFile(delete=False, suffix='.csv') as tmp_csv:
                             tmp_csv_path = tmp_csv.name
 
-                        if use_descriptive:
-                            CSVHandler.generate_descriptive_template(fields, tmp_csv_path)
-                            if include_info:
-                                CSVHandler.generate_template_with_info(fields, tmp_csv_path)
+                        if include_info:
+                            CSVHandler.generate_template_with_info(fields, tmp_csv_path)
                         else:
-                            if include_info:
-                                CSVHandler.generate_template_with_info(fields, tmp_csv_path)
-                            else:
-                                CSVHandler.generate_template(fields, tmp_csv_path)
+                            CSVHandler.generate_template(fields, tmp_csv_path)
 
                         # Leer CSV para descarga
                         with open(tmp_csv_path, 'rb') as f:
@@ -159,15 +148,17 @@ def main():
 
                         # Descargar archivos adicionales
                         files_to_download = []
-                        if include_info:
-                            info_path = tmp_csv_path.replace('.csv', '_INFO.txt')
-                            if os.path.exists(info_path):
-                                files_to_download.append(('INFO.txt', info_path, 'text/plain'))
 
-                        if use_descriptive:
-                            mapping_path = tmp_csv_path.replace('.csv', '_MAPEO.txt')
-                            if os.path.exists(mapping_path):
-                                files_to_download.append(('MAPEO.txt', mapping_path, 'text/plain'))
+                        # Archivo de mapeo (siempre se genera)
+                        mapping_path = tmp_csv_path.replace('.csv', '_mapeo.txt')
+                        if os.path.exists(mapping_path):
+                            files_to_download.append(('mapeo.txt', mapping_path, 'text/plain'))
+
+                        # Archivo INFO (opcional)
+                        if include_info:
+                            info_path = tmp_csv_path.replace('.csv', '_info.txt')
+                            if os.path.exists(info_path):
+                                files_to_download.append(('info.txt', info_path, 'text/plain'))
 
                         # Botones de descarga para archivos adicionales
                         if files_to_download:
@@ -184,10 +175,8 @@ def main():
                                         use_container_width=True
                                     )
 
-                        st.success("✅ Plantilla generada. Ahora edita el CSV y pasa al **Paso 2**.")
-
-                        if use_descriptive:
-                            st.info("💡 Recuerda subir también el archivo MAPEO.txt junto con tu CSV al rellenar el PDF")
+                        st.success("✅ Plantilla generada. **Edita el CSV** y pasa al **Paso 2**.")
+                        st.info("💡 **IMPORTANTE:** Descarga también el archivo **mapeo.txt** - lo necesitarás para rellenar el PDF")
 
                         # Limpiar archivos temporales
                         os.unlink(tmp_csv_path)
@@ -197,19 +186,21 @@ def main():
                 else:
                     st.warning("⚠️ Este PDF no tiene campos de formulario detectables.")
                     st.info("💡 Asegúrate de que el PDF tenga campos interactivos (no es un PDF escaneado).")
-                
+
             except Exception as e:
                 st.error(f"❌ Error al procesar el PDF: {str(e)}")
-            
+                import traceback
+                st.code(traceback.format_exc())
+
             finally:
                 # Limpiar archivo temporal
                 if os.path.exists(tmp_pdf_path):
                     os.unlink(tmp_pdf_path)
-    
+
     # TAB 2: RELLENAR PDF
     with tab2:
         st.header("Paso 2: Rellenar el PDF")
-        st.markdown("Sube el PDF original y el CSV con los datos para generar el PDF rellenado.")
+        st.markdown("Sube el PDF original, el CSV con tus datos y el archivo de mapeo.")
 
         col_pdf, col_csv, col_map = st.columns([2, 2, 1])
 
@@ -231,12 +222,12 @@ def main():
 
         with col_map:
             mapping_file = st.file_uploader(
-                "🗺️ Archivo MAPEO",
+                "🗺️ Archivo mapeo.txt",
                 type=['txt'],
                 key='mapping_file',
-                help="Opcional: archivo MAPEO.txt si usaste nombres descriptivos"
+                help="REQUERIDO: archivo de mapeo generado en el Paso 1"
             )
-        
+
         if pdf_to_fill and csv_data_file:
             # Guardar archivos temporalmente
             with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_pdf:
@@ -255,63 +246,79 @@ def main():
                     tmp_mapping_path = tmp_map.name
 
             try:
-                # Leer datos del CSV (con o sin mapeo)
+                # Leer datos del CSV con mapeo
                 if tmp_mapping_path:
-                    csv_data = CSVHandler.read_descriptive_csv(tmp_csv_path, tmp_mapping_path)
-                    st.info("🗺️ Usando archivo de mapeo para convertir nombres descriptivos")
+                    csv_data = CSVHandler.read_csv_with_mapping(tmp_csv_path, tmp_mapping_path)
+                    st.success("✅ Archivo de mapeo cargado correctamente")
                 else:
-                    csv_data = CSVHandler.get_first_row_data(tmp_csv_path)
-                
-                st.success(f"✅ CSV leído: {len(csv_data)} campos detectados")
-                
-                # Preview de datos
-                with st.expander("👀 Preview de datos a rellenar"):
-                    for field, value in csv_data.items():
-                        if value and value != '':
-                            st.text(f"• {field}: {value}")
-                
-                # Opciones de relleno
-                st.markdown("---")
-                
-                flatten = st.checkbox(
-                    "🔒 Aplanar PDF (campos no editables después)",
-                    value=False,
-                    help="Si marcas esto, el PDF final no podrá ser editado"
-                )
-                
-                if st.button("✨ Rellenar PDF", type="primary", use_container_width=True):
-                    with st.spinner("Rellenando PDF..."):
-                        # Rellenar PDF
-                        filler = PDFFiller(tmp_pdf_path)
-                        
-                        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_output:
-                            tmp_output_path = tmp_output.name
-                        
-                        success = filler.fill_pdf(csv_data, tmp_output_path, flatten=flatten)
-                        
-                        if success:
-                            st.success("🎉 ¡PDF rellenado exitosamente!")
-                            
-                            # Leer PDF rellenado para descarga
-                            with open(tmp_output_path, 'rb') as f:
-                                pdf_bytes = f.read()
-                            
-                            st.download_button(
-                                label="💾 Descargar PDF rellenado",
-                                data=pdf_bytes,
-                                file_name=f"{Path(pdf_to_fill.name).stem}_rellenado.pdf",
-                                mime="application/pdf",
-                                use_container_width=True
-                            )
-                            
-                            # Limpiar
-                            os.unlink(tmp_output_path)
-                        else:
-                            st.error("❌ Error al rellenar el PDF. Verifica que los campos coincidan.")
-                
+                    st.error("❌ Falta el archivo de mapeo. Por favor súbelo.")
+                    csv_data = None
+
+                if csv_data:
+                    st.success(f"✅ CSV leído: {len(csv_data)} campos con datos")
+
+                    # Preview de datos
+                    with st.expander("👀 Preview de datos a rellenar"):
+                        for field, value in csv_data.items():
+                            if value and value != '':
+                                st.text(f"• {field}: {value}")
+
+                    # Opciones de relleno
+                    st.markdown("---")
+
+                    flatten = st.checkbox(
+                        "🔒 Aplanar PDF (campos no editables después)",
+                        value=False,
+                        help="Si marcas esto, el PDF final no podrá ser editado"
+                    )
+
+                    if st.button("✨ Rellenar PDF", type="primary", use_container_width=True):
+                        with st.spinner("Rellenando PDF..."):
+                            # Rellenar PDF
+                            filler = PDFFiller(tmp_pdf_path)
+
+                            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_output:
+                                tmp_output_path = tmp_output.name
+
+                            # Capturar output
+                            import io
+                            from contextlib import redirect_stdout
+
+                            output_buffer = io.StringIO()
+                            with redirect_stdout(output_buffer):
+                                success = filler.fill_pdf(csv_data, tmp_output_path, flatten=flatten)
+
+                            # Mostrar logs
+                            logs = output_buffer.getvalue()
+                            if logs:
+                                with st.expander("📋 Ver logs de proceso"):
+                                    st.code(logs)
+
+                            if success:
+                                st.success("🎉 ¡PDF rellenado exitosamente!")
+
+                                # Leer PDF rellenado para descarga
+                                with open(tmp_output_path, 'rb') as f:
+                                    pdf_bytes = f.read()
+
+                                st.download_button(
+                                    label="💾 Descargar PDF rellenado",
+                                    data=pdf_bytes,
+                                    file_name=f"{Path(pdf_to_fill.name).stem}_rellenado.pdf",
+                                    mime="application/pdf",
+                                    use_container_width=True
+                                )
+
+                                # Limpiar
+                                os.unlink(tmp_output_path)
+                            else:
+                                st.error("❌ Error al rellenar el PDF. Revisa los logs arriba para más detalles.")
+
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
-            
+                import traceback
+                st.code(traceback.format_exc())
+
             finally:
                 # Limpiar archivos temporales
                 if os.path.exists(tmp_pdf_path):
@@ -320,7 +327,7 @@ def main():
                     os.unlink(tmp_csv_path)
                 if tmp_mapping_path and os.path.exists(tmp_mapping_path):
                     os.unlink(tmp_mapping_path)
-        
+
         elif not pdf_to_fill:
             st.info("👆 Sube el PDF original")
         elif not csv_data_file:
@@ -329,7 +336,7 @@ def main():
     # TAB 3: EDITOR RÁPIDO
     with tab3:
         st.header("⚡ Editor Rápido - Todo en Uno")
-        st.markdown("Sube tu PDF, edita los campos directamente en la web y descarga el PDF rellenado.")
+        st.markdown("Sube tu PDF y edita los campos directamente en la web. Sin CSV necesario.")
 
         pdf_quick = st.file_uploader(
             "📄 Sube tu PDF",
@@ -344,8 +351,9 @@ def main():
                 tmp_pdf_path = tmp_pdf.name
 
             try:
-                extractor = PDFExtractor(tmp_pdf_path)
-                fields = extractor.get_fields_with_descriptions()
+                with st.spinner("Analizando PDF..."):
+                    extractor = PDFExtractor(tmp_pdf_path)
+                    fields = extractor.get_fields_with_labels()
 
                 if fields:
                     st.success(f"✅ {len(fields)} campos detectados")
@@ -356,28 +364,28 @@ def main():
                     with st.form("quick_edit_form"):
                         form_data = {}
 
-                        # Organizar en dos columnas
+                        # Organizar campos
                         for i, (field_name, field_data) in enumerate(fields.items()):
-                            desc = field_data.get('suggested_description', field_name)
+                            label = field_data.get('label', field_name)
                             field_type = field_data['type']
 
                             # Crear input según el tipo de campo
                             if field_type == 'checkbox':
                                 form_data[field_name] = st.checkbox(
-                                    f"{desc}",
+                                    f"{label}",
                                     key=f"quick_{field_name}",
                                     help=f"Campo: {field_name}"
                                 )
                             elif field_type == 'dropdown' and field_data['options']:
                                 form_data[field_name] = st.selectbox(
-                                    f"{desc}",
+                                    f"{label}",
                                     options=[''] + field_data['options'],
                                     key=f"quick_{field_name}",
                                     help=f"Campo: {field_name}"
                                 )
                             else:
                                 form_data[field_name] = st.text_input(
-                                    f"{desc}",
+                                    f"{label}",
                                     key=f"quick_{field_name}",
                                     help=f"Campo: {field_name}"
                                 )
@@ -428,6 +436,8 @@ def main():
 
             except Exception as e:
                 st.error(f"❌ Error: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
             finally:
                 if os.path.exists(tmp_pdf_path):
                     os.unlink(tmp_pdf_path)
@@ -436,7 +446,7 @@ def main():
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666;'>
-        <small>PDF Form Filler v0.1 | MVP sin soporte de tablas</small>
+        <small>PDF Form Filler v0.3 - Refactorizado | Detección automática de etiquetas</small>
     </div>
     """, unsafe_allow_html=True)
 

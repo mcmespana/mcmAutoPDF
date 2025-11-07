@@ -3,71 +3,85 @@ Módulo para generar y leer plantillas CSV.
 """
 
 import pandas as pd
-import os
 from typing import Dict, List, Any
 
 
 class CSVHandler:
     """Maneja la generación y lectura de plantillas CSV."""
-    
+
     @staticmethod
     def generate_template(fields: Dict[str, Any], output_path: str) -> None:
         """
-        Genera un CSV template con los nombres de los campos.
-        
+        Genera un CSV template usando las etiquetas detectadas de los campos.
+
         Args:
-            fields: Diccionario de campos {nombre: {tipo, valor, opciones, ...}}
+            fields: Diccionario de campos {nombre: {tipo, valor, opciones, label, ...}}
             output_path: Ruta donde guardar el CSV
         """
-        # Crear DataFrame con los nombres de campos como columnas
-        field_names = list(fields.keys())
-        
-        # Fila de ejemplo vacía
-        df = pd.DataFrame(columns=field_names)
-        
-        # Añadir una fila de ejemplo con valores por defecto según tipo
-        example_row = {}
+        # Crear mapeo de etiquetas a nombres técnicos
+        label_to_technical = {}
+        labels = []
+
         for field_name, field_data in fields.items():
+            label = field_data.get('label', field_name)
+
+            # Si hay duplicados, agregar número
+            original_label = label
+            counter = 2
+            while label in labels:
+                label = f"{original_label} {counter}"
+                counter += 1
+
+            labels.append(label)
+            label_to_technical[label] = field_name
+
+        # Crear fila de ejemplo
+        example_row = {}
+        for label, field_name in label_to_technical.items():
+            field_data = fields[field_name]
             field_type = field_data['type']
-            
+
             if field_type == 'checkbox':
-                example_row[field_name] = '__YES__'  # o '__NO__'
+                example_row[label] = '__YES__'
             elif field_type == 'dropdown' and field_data['options']:
-                example_row[field_name] = field_data['options'][0]
+                example_row[label] = field_data['options'][0]
             else:
-                example_row[field_name] = ''
-        
+                example_row[label] = ''
+
+        # Crear DataFrame y guardar
         df = pd.DataFrame([example_row])
-        
-        # Guardar CSV
         df.to_csv(output_path, index=False, encoding='utf-8-sig')
-    
+
+        # Guardar mapeo en archivo adicional para referencia
+        mapping_path = output_path.replace('.csv', '_mapeo.txt')
+        with open(mapping_path, 'w', encoding='utf-8') as f:
+            f.write("=== MAPEO DE CAMPOS ===\n")
+            f.write("Mapeo automático de etiquetas a nombres técnicos del PDF\n\n")
+            for label, tech_name in label_to_technical.items():
+                f.write(f"{label} → {tech_name}\n")
+
     @staticmethod
     def generate_template_with_info(fields: Dict[str, Any], output_path: str) -> None:
         """
         Genera un CSV template con información adicional sobre cada campo.
-        Incluye comentarios sobre tipo de campo y opciones.
 
         Args:
             fields: Diccionario de campos
             output_path: Ruta donde guardar el CSV
         """
-        # Crear el CSV normal
+        # Generar el CSV normal
         CSVHandler.generate_template(fields, output_path)
 
         # Añadir archivo de información adicional
-        info_path = output_path.replace('.csv', '_INFO.txt')
+        info_path = output_path.replace('.csv', '_info.txt')
         with open(info_path, 'w', encoding='utf-8') as f:
             f.write("=== INFORMACIÓN DE CAMPOS ===\n\n")
 
             for field_name, field_data in fields.items():
-                # Mostrar descripción sugerida si existe
-                if 'suggested_description' in field_data:
-                    f.write(f"📝 {field_data['suggested_description']}\n")
-                    f.write(f"   Nombre técnico: {field_name}\n")
-                else:
-                    f.write(f"Campo: {field_name}\n")
+                label = field_data.get('label', field_name)
 
+                f.write(f"📝 {label}\n")
+                f.write(f"   Nombre técnico: {field_name}\n")
                 f.write(f"   Tipo: {field_data['type']}\n")
 
                 if field_data.get('required'):
@@ -81,169 +95,75 @@ class CSVHandler:
                 f.write("\n")
 
     @staticmethod
-    def generate_descriptive_template(fields: Dict[str, Any], output_path: str) -> None:
+    def read_csv_with_mapping(csv_path: str, mapping_path: str) -> Dict[str, str]:
         """
-        Genera un CSV con nombres de columnas descriptivos en lugar de técnicos.
+        Lee un CSV y lo convierte usando el archivo de mapeo.
 
-        Args:
-            fields: Diccionario de campos con suggested_description
-            output_path: Ruta donde guardar el CSV
-        """
-        # Crear mapeo de descripción -> nombre técnico
-        mapping = {}
-        descriptive_names = []
-
-        for field_name, field_data in fields.items():
-            desc = field_data.get('suggested_description', field_name)
-            # Si hay duplicados, agregar el nombre técnico entre paréntesis
-            if desc in descriptive_names:
-                desc = f"{desc} ({field_name})"
-            descriptive_names.append(desc)
-            mapping[desc] = field_name
-
-        # Crear DataFrame con nombres descriptivos
-        example_row = {}
-        for field_name, field_data in fields.items():
-            field_type = field_data['type']
-            desc = field_data.get('suggested_description', field_name)
-
-            # Ajustar si hay duplicado
-            if desc in example_row and desc != field_name:
-                desc = f"{desc} ({field_name})"
-
-            if field_type == 'checkbox':
-                example_row[desc] = '__YES__'
-            elif field_type == 'dropdown' and field_data['options']:
-                example_row[desc] = field_data['options'][0]
-            else:
-                example_row[desc] = ''
-
-        df = pd.DataFrame([example_row])
-        df.to_csv(output_path, index=False, encoding='utf-8-sig')
-
-        # Guardar archivo de mapeo
-        mapping_path = output_path.replace('.csv', '_MAPEO.txt')
-        with open(mapping_path, 'w', encoding='utf-8') as f:
-            f.write("=== MAPEO DE CAMPOS ===\n\n")
-            f.write("Descripción → Nombre técnico en PDF\n")
-            f.write("-" * 60 + "\n\n")
-
-            for desc, tech_name in mapping.items():
-                f.write(f"{desc}\n  → {tech_name}\n\n")
-    
-    @staticmethod
-    def read_data(csv_path: str) -> List[Dict[str, str]]:
-        """
-        Lee datos de un CSV.
-        
-        Para el MVP, solo usamos la primera fila.
-        En el futuro, múltiples filas servirán para tablas.
-        
         Args:
             csv_path: Ruta al CSV con datos
-            
-        Returns:
-            Lista de diccionarios (una entrada por fila)
-        """
-        df = pd.read_csv(csv_path, encoding='utf-8-sig')
-        
-        # Convertir a lista de diccionarios
-        data = df.to_dict('records')
-        
-        # Limpiar valores NaN
-        for row in data:
-            for key in row:
-                if pd.isna(row[key]):
-                    row[key] = ''
-                else:
-                    row[key] = str(row[key])
-        
-        return data
-    
-    @staticmethod
-    def get_first_row_data(csv_path: str) -> Dict[str, str]:
-        """
-        Lee solo la primera fila del CSV (para campos normales).
-
-        Args:
-            csv_path: Ruta al CSV
-
-        Returns:
-            Diccionario con datos de la primera fila
-        """
-        data = CSVHandler.read_data(csv_path)
-        return data[0] if data else {}
-
-    @staticmethod
-    def read_descriptive_csv(csv_path: str, mapping_path: str = None) -> Dict[str, str]:
-        """
-        Lee un CSV con nombres descriptivos y lo convierte a nombres técnicos.
-
-        Args:
-            csv_path: Ruta al CSV con nombres descriptivos
-            mapping_path: Ruta al archivo de mapeo (opcional, se busca automáticamente)
+            mapping_path: Ruta al archivo de mapeo
 
         Returns:
             Diccionario con nombres técnicos -> valores
         """
-        # Si no se proporciona mapeo, buscar archivo _MAPEO.txt
-        if mapping_path is None:
-            mapping_path = csv_path.replace('.csv', '_MAPEO.txt')
-
-        # Si no existe el archivo de mapeo, asumir que es CSV normal
-        if not os.path.exists(mapping_path):
-            return CSVHandler.get_first_row_data(csv_path)
-
         # Leer mapeo
-        mapping = {}
+        label_to_technical = {}
         try:
             with open(mapping_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-                current_desc = None
-                for line in lines:
+                for line in f:
                     line = line.strip()
-                    if line.startswith('→'):
-                        # Línea con nombre técnico
-                        tech_name = line.replace('→', '').strip()
-                        if current_desc:
-                            mapping[current_desc] = tech_name
-                    elif line and not line.startswith('=') and not line.startswith('-') and 'Descripción' not in line:
-                        # Línea con descripción
-                        current_desc = line
+                    if '→' in line:
+                        parts = line.split('→')
+                        if len(parts) == 2:
+                            label = parts[0].strip()
+                            tech_name = parts[1].strip()
+                            label_to_technical[label] = tech_name
         except Exception as e:
-            print(f"[WARNING] No se pudo leer archivo de mapeo: {e}")
-            return CSVHandler.get_first_row_data(csv_path)
+            raise ValueError(f"Error al leer archivo de mapeo: {e}")
 
-        # Leer CSV con nombres descriptivos
-        descriptive_data = CSVHandler.get_first_row_data(csv_path)
+        # Leer CSV
+        df = pd.read_csv(csv_path, encoding='utf-8-sig')
+        if len(df) == 0:
+            return {}
+
+        # Obtener primera fila
+        row_data = df.iloc[0].to_dict()
 
         # Convertir a nombres técnicos
         technical_data = {}
-        for desc, value in descriptive_data.items():
-            tech_name = mapping.get(desc, desc)  # Si no hay mapeo, usar el nombre original
-            technical_data[tech_name] = value
+        for label, value in row_data.items():
+            tech_name = label_to_technical.get(label, label)
+
+            # Limpiar valores NaN
+            if pd.isna(value):
+                value = ''
+            else:
+                value = str(value)
+
+            if value and value != '':
+                technical_data[tech_name] = value
 
         return technical_data
-    
+
     @staticmethod
     def validate_csv(csv_path: str, expected_fields: List[str]) -> Dict[str, Any]:
         """
         Valida que el CSV contenga los campos esperados.
-        
+
         Args:
             csv_path: Ruta al CSV
             expected_fields: Lista de campos que debe contener
-            
+
         Returns:
             Diccionario con resultado de validación
         """
         try:
             df = pd.read_csv(csv_path, encoding='utf-8-sig')
             csv_fields = list(df.columns)
-            
+
             missing = set(expected_fields) - set(csv_fields)
             extra = set(csv_fields) - set(expected_fields)
-            
+
             return {
                 'valid': len(missing) == 0,
                 'missing_fields': list(missing),
